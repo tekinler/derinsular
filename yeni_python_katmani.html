@@ -1,0 +1,103 @@
+Caffe'ye yeni bir Python katmanı ekleme
+
+Caffe'de temel hesaplama birimleri katmanlardır. Her katmanın kendine özgü görevleri vardır. Bir hesaplama yapmak isterseniz, o hesabın yapıldığı katmanı, oluşturmuş olduğunuz ağa (net) eklemeniz yeterlidir. 
+Caffe'de makine öğrenmesinde kullanılabilecek birçok fonksiyon/katman mevcut. Ancak bazen sizin istediğiniz bir işi, var olan fonksiyonlar yerine getirmeyebilir. Ya da sizin probleminize özgü bir fonksiyon yazılması gerekebilir. Bu durumda yeni bir katman eklemekten başka çare yoktur.
+Caffe'de yeni bir katman eklemek kolaydır. Hele bir de python katmanı eklenecekse bu daha da kolaydır.
+
+Baştan itibaren bir python katmanı nasıl eklenir, sırasıyla yazalım:
+
+1.
+/include/caffe/python_layer.hpp 
+python_layer.hpp başlık dosyasının gerekli dizinde olması gerekir, yoksa eğer kendimiz elle oluşturacağız.
+url: https://github.com/longjon/caffe/commit/a48990d5951e4c5d286b7d0dfdf04b8afa9cfb62
+
+2. 
+/src/caffe/layer_factory.cpp
+bu dosyada python_layer için gerekli düzenlemeleri yapmamız gerekir. Eğer Caffe'yi son sürümde kullanıyorsanız değişiklik yapmaya gerek yok.
+
+3.
+/src/caffe/layers/python_layer.cpp
+dosyası (eğer yoksa) gösterilen dizinde oluşturulmalıdır. Bu dosya da son sürümle beraber geliyor.
+url: https://github.com/longjon/caffe/commit/a48990d5951e4c5d286b7d0dfdf04b8afa9cfb62
+
+4. 
+/src/caffe/proto/caffe.proto
+dosyası son sürümle beraber geldiği için değişiklik yapmaya gerek kalmıyor. 
+
+5.
+Makefile.config dosyasında
+WITH_PYTHON_LAYER := 1 satırındaki yorum işleci kaldırılmalıdır.
+
+Bu değişikliklerin etkinleşmesi için caffe'yi yeniden derlemek gerekiyor. Bunun için caffe dizininde sırasıyla
+make pycaffe
+make all
+make test
+make runtest
+komutları verilmelidir.
+
+Buraya kadar anlattıklarım python katmanı oluşturmak için altyapıyı kurmak içindi. Şimdi python katmanı oluşturmaya başlayabiliriz.
+İşe örnek bir prototxt oluşturmakla başlayalım:
+"Ekle10.prototxt"
+name: 'Ekle10'
+input: 'data'
+input_shape {
+  dim: 1
+  dim: 1
+  dim: 1
+  dim: 1
+}
+
+layer {
+  name: "ekle10"
+  type: "Python"
+  bottom: "data"
+  top: "ekle10_output"
+  python_param { 
+    module: "Ekle10Modul" 
+    layer: "Ekle10Layer"    
+  }
+  loss_weight: 1
+}
+
+Bu oluşturduğumuz prototxt iki tane katmandan oluşuyor. İlki bir adet 4-Boyutlu tensor. Bu tensor sadece bir değer içerecek.
+İkinci katman ise birinci katmandan gelen değere 10 ekleyip çıkışa verecek. 
+Oluşturduğumuz ağ (net) aşağıda görülüyor. (sampleNet_prototxt)
+
+Verilen girdiye 10 ekleyen katmanı şimdi yazabiliriz:
+"Ekle10Modul.py"
+
+import caffe
+
+class Ekle10Layer(caffe.Layer):
+	'''Girdiye 10 ekleyen python katmanı.'''
+	def setup(self, bottom, top):
+		pass
+		
+	'''girdi boyutlarını caffe'nin kendi boyutlarına uydurmamız gerekiyor.'''
+	def reshape(self, bottom, top):
+        top[0].reshape(bottom[0].num, bottom[0].channels,
+                bottom[0].height, bottom[0].width)
+
+	'''Sadece forward işlemi yapılacak.'''			
+    def forward(self, bottom, top):
+        top[0].data[...] = bottom[0].data + 10
+	
+	'''Gradient hesabı olmayacağı için backward yapmaya da gerek yok.'''
+    def backward(self, top, propagate_down, bottom):
+        pass
+
+python katmanının kodunu da yazdığımıza ($PYTHONPATH içinde olmasına dikkat edin) göre doğru çalışıp çalışmadığını kontrol edelim:
+
+import caffe
+import numpy as np
+
+net = caffe.Net('Ekle10.prototxt', caffe.TEST)
+input1 = np.array([[[[100]]]])
+net.blobs['data'].data[...] = input1
+net.forward()
+net.blobs['ekle10_output'].data[0][0][0][0]
+
+Bunun sonucunda verilen 100 değerine 10 eklenmiş olarak 110.0 değerini (float32) elde ederiz. 
+
+Bu yazıda, baştan sona Caffe için bir python katmanı oluşturduk. Bunun için önce alt yapı değişikliklerini gerçekleştirdik. Bundan sonra istenilen görevi yapan python katmanı yazdık. En son aşamada ise yazdığımız katmanın düzgün çalışıp çalışmadığını kontrol ettik. Gerçekten de oluşturduğumuz katman kendisinden istenilen görevi, basit şekilde gelen veriye 10 ekleme, yaptığını gördük.
+
